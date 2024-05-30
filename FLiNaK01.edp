@@ -1,0 +1,101 @@
+bool debug = true;
+
+// int an1=20,an2=20; // ,bn1=50,bn2=50;
+int an1=5,an2=20; // ,bn1=50,bn2=50;       <==OBS!!OBS!!
+
+real T1=0.1,T2=0.3,T3=.095,T4=.28,T5=0.005,T6=0.02;
+// real R2=.30, R1=0.035; //b=height of region(=thikness),   <==OBS!!OBS!!
+                          // R2: height = 65mm - 70mm 
+                          // R1: = radius of outer circle: 25mm.
+real TL=0.1; //TL in m, TL=TL of x(spacial)-cordinat
+T1=T1/TL;T2=T2/TL;T3=T3/TL;T4=T4/TL;T5=T5/TL;T6=T6/TL;
+
+// Doain for computations
+// outside boundary of loop
+//
+border a1(t=0,T2){x=T1;y=t;label=1;}
+border a2(t=T1,T5){x=t;y=T2;label=1;}
+border a3(t=T2,T6){x=T5;y=t;label=2;}
+border a4(t=T5,0){x=t;y=T6;label=2;}
+border a5(t=T6,0){x=0;y=t;label=1;}
+border a6(t=0,T1){x=t;y=0;label=1;}
+
+// Doain for representation with plotting
+T1=T1*TL;T2=T2*TL;T3=T3*TL;T4=T4*TL;T5=T5*TL;T6=T6*TL;
+// outside boundary of loop
+border d1(t=0,T2){x=T1;y=t;label=11;}
+border d2(t=T1,T5){x=t;y=T2;label=11;}
+border d3(t=T2,T6){x=T5;y=t;label=12;}
+border d4(t=T5,0){x=t;y=T6;label=12;}
+border d5(t=T6,0){x=0;y=t;label=11;}
+border d6(t=0,T1){x=t;y=0;label=11;}
+
+mesh Th = buildmesh(a1(an2)+a2(an2)+a3(an2)+a4(an1)+a5(an1)+a6(an2)); 
+
+mesh Th2 = buildmesh(d1(an2)+d2(an2)+d3(an2)+d4(an1)+d5(an1)+d6(an2)); 
+
+plot(Th2,wait=1);
+
+fespace Ph(Th,P0);
+//real x0=R1*0.5;
+//real y0=R2*0.5;
+//
+//Ph reg=region;
+//int in =reg(x0,y0);
+
+real kelvin=273;   // 0C=273K
+real low=500+kelvin; real high=700+kelvin; // temperares of boundaries, and intitial cond.
+real Qpower=100.0e6; //  100WW/m3
+// Ph Q1=(region==in);
+
+fespace Vh(Th,P2), Qh(Th,P1);
+fespace Vh2(Th2,P2), Qh2(Th2,P1);
+Vh u=0,v=0,uu,vv,up,vp;
+Qh p=0,pp;
+//macro r() sqrt(u*u+v*v)
+//plot(fh,Th, wait=1);
+int n=0;
+real mu=2.9e-3,rho=2.02e3; //mu=viscosity(MKS), rho=density(MKS) 
+real TU=0.05, TDT=50., TT=high; //TL=0.5 (TL=typical Length)
+     //TDT=typical delta temperature
+     //TT=typical temperature 
+     //TU in m/sec (should be checked after calculation)
+// typical length, typical velocity, viscosity, density, typical difference of temperatures, typical temperature
+real g=9.8,beta=3.61e-4,Cp=1.883e3,kappa=0.92;
+       //g=gravity(MKS)
+       //beta=thermal expansion coef.,
+       //Cp=heat capasity (MKS)=J/Kg/K
+       //kappa=thermal conductivity
+// acceleration due to gravity, cubical expansion ratio, thermal diffusivity
+real Re,Pr;  // Reynolds number, Prandtl number
+Re=rho*TU*TL/mu;Pr=Cp*mu/kappa;  // Reynolds number, Prandtl number
+low=(low-TT)/TDT; high=(high-TT)/TDT; //scale temperature by TDT(typical delta temperature)
+real QQ;  QQ=(Qpower/(Cp*rho))/TDT;//heat generation source term
+// high=(high-TT)/TDT;  
+// conversion of temperatures to dimensionless numbers
+Qh r=high, rr, rp; 
+real T=100.0, dt=0.1;   // dt=time step, T=Total time(termination of calculation)
+Vh2 wu,wv,wr; 
+Qh2 wp;
+real wt;
+for (real t=0;t<T;t+=dt){
+	up=u;vp=v;
+	solve NS([u,v,p],[uu,vv,pp],solver=Crout,init=n) =
+	int2d(Th)( u*uu+v*vv
+	+(dt/Re)*(dx(u)*dx(uu)+dx(u)*uu/x+dy(u)*dy(uu)
+	+ dx(v)*dx(vv)+dx(v)*vv/x+dy(v)*dy(vv)-u*uu/(x*x))
+	+ p*pp*1.0e-6 //reason of this term and e-6 should be confirmed {130417}
+	- dt*(p*(dx(uu)+dy(vv))+pp*(dx(u)+dy(v))))
+	- int2d(Th)(convect([up,vp],-dt,up)*uu
+	+convect([up,vp],-dt,vp)*vv +r*vv*g*beta*TDT/TU/TU) //(beta*TDT)=re-scale to temperature
+// convection terms and a buoyancy term
+	+ on(1,2,3,v=0,u=0); // boundary conditions; velocities = 0
+	solve thermal(r,rr,solver=Crout,init=n) =
+	int2d(Th)(r*rr+dt*(dx(r)*dx(rr)+dx(r)*rr/x+dy(r)*dy(rr))/Re/Pr) 
+	   //(1/(Re*Pr)=diffusion coeff of temperature)
+	- int2d(Th)(convect([up,vp],-dt,rp)*rr) //+QQ*rr) // convection terms
+	+ on(1,r=low)+on(3,r=high);//+on(4,r=low); // boundary conditions of temperatures
+	wu=TU*u;wv=TU*v;wr=r*TDT+TT-kelvin;wp=rho*TU*TU*p;wt=(TL/TU)*t;
+    plot([wu,wv],value=1,coef=0.0035, cmm="t="+wt); //<==OBS!!OBS!!
+    n++;  
+}
